@@ -43,7 +43,7 @@ for key, value in data.items():
         for problem_id, problem_data in problems.items():
             total_problems += 1
             
-            # Check if compilation failed
+            # Only process problems that compiled successfully
             if problem_data.get('compilation_failed') == False:
                 compiled_problems += 1
                 print(f"Processing problem {problem_id}...")

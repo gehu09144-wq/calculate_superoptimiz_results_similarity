@@ -138,15 +138,32 @@ def process_all_problems(
         unopt_file_path = problem_dir / unoptimized_file
         json_file_path = problem_dir / samples_json
         
-        if not gen_file_path.exists() or not unopt_file_path.exists():
-            print(f"Skipping {problem_id}: Missing required files ({generated_file} or {unoptimized_file})")
+        # Check if files exist
+        gen_exists = gen_file_path.exists()
+        unopt_exists = unopt_file_path.exists()
+        
+        if not gen_exists and not unopt_exists:
+            print(f"Skipping {problem_id}: Missing both {generated_file} and {unoptimized_file}")
             continue
         
-        # Calculate similarity
-        similarity = calculate_similarity(str(gen_file_path), str(unopt_file_path))
+        # Calculate similarity (use empty similarity if files are missing)
+        if gen_exists and unopt_exists:
+            similarity = calculate_similarity(str(gen_file_path), str(unopt_file_path))
+        else:
+            # If one or both files are missing, set similarity to 0
+            similarity = {
+                'line_similarity': 0.0,
+                'instruction_similarity': 0.0,
+                'overall_similarity': 0.0
+            }
+            if not gen_exists:
+                print(f"  Warning: {problem_id} missing {generated_file}")
+            if not unopt_exists:
+                print(f"  Warning: {problem_id} missing {unoptimized_file}")
         
         # Read JSON (if exists and update is needed)
         correct = False
+        status_summary = ""
         if json_file_path.exists() and update_json:
             try:
                 with open(json_file_path, 'r', encoding='utf-8') as f:
@@ -156,6 +173,20 @@ def process_all_problems(
                 if 'samples' in data and sample_key in data['samples']:
                     data['samples'][sample_key]['similarity'] = similarity
                     correct = data.get('samples', {}).get(sample_key, {}).get('correct', False)
+                    
+                    # Extract status information from test_cases
+                    sample_data = data['samples'][sample_key]
+                    if 'test_cases' in sample_data:
+                        status_counts = {}
+                        for test_case in sample_data['test_cases']:
+                            status = test_case.get('status', 'unknown')
+                            status_counts[status] = status_counts.get(status, 0) + 1
+                        
+                        # Format status summary
+                        status_parts = []
+                        for status, count in sorted(status_counts.items()):
+                            status_parts.append(f"{count} {status}")
+                        status_summary = ", ".join(status_parts)
                 
                 # Save updated JSON
                 with open(json_file_path, 'w', encoding='utf-8') as f:
@@ -169,13 +200,28 @@ def process_all_problems(
                 with open(json_file_path, 'r', encoding='utf-8') as f:
                     data = json.load(f)
                 correct = data.get('samples', {}).get(sample_key, {}).get('correct', False)
+                
+                # Extract status information from test_cases
+                sample_data = data.get('samples', {}).get(sample_key, {})
+                if 'test_cases' in sample_data:
+                    status_counts = {}
+                    for test_case in sample_data['test_cases']:
+                        status = test_case.get('status', 'unknown')
+                        status_counts[status] = status_counts.get(status, 0) + 1
+                    
+                    # Format status summary
+                    status_parts = []
+                    for status, count in sorted(status_counts.items()):
+                        status_parts.append(f"{count} {status}")
+                    status_summary = ", ".join(status_parts)
             except:
                 pass
         
         results.append({
             'problem_id': problem_id,
             'similarity': similarity,
-            'correct': correct
+            'correct': correct,
+            'status': status_summary
         })
         
         print(f"✓ {problem_id}: Similarity = {similarity['overall_similarity']:.4f}")
@@ -193,20 +239,24 @@ def generate_report(results: List[Dict], output_file: str = None):
     
     # Generate report
     report_lines = []
-    report_lines.append("=" * 80)
+    report_lines.append("=" * 120)
     report_lines.append("Assembly Code Similarity Report")
-    report_lines.append("=" * 80)
+    report_lines.append("=" * 120)
     report_lines.append(f"\nTotal: {len(results)} problems\n")
-    report_lines.append(f"{'Problem ID':<15} {'Overall Sim':<12} {'Line Similar':<12} {'Inst Similar':<12} {'Correct':<8}")
-    report_lines.append("-" * 80)
+    report_lines.append(f"{'Problem ID':<15} {'Overall Sim':<12} {'Line Similar':<12} {'Inst Similar':<12} {'Correct':<8} {'Status':<30}")
+    report_lines.append("-" * 120)
     
     for result in sorted_results:
         problem_id = result['problem_id']
         sim = result['similarity']
         correct = "✓" if result['correct'] else "✗"
+        status = result.get('status', 'N/A')
+        # Truncate status if too long
+        if len(status) > 28:
+            status = status[:25] + "..."
         report_lines.append(
             f"{problem_id:<15} {sim['overall_similarity']:<12.4f} {sim['line_similarity']:<12.4f} "
-            f"{sim['instruction_similarity']:<12.4f} {correct:<8}"
+            f"{sim['instruction_similarity']:<12.4f} {correct:<8} {status:<30}"
         )
     
     # Statistics
@@ -214,7 +264,7 @@ def generate_report(results: List[Dict], output_file: str = None):
     line_sims = [r['similarity']['line_similarity'] for r in results]
     inst_sims = [r['similarity']['instruction_similarity'] for r in results]
     
-    report_lines.append("-" * 80)
+    report_lines.append("-" * 120)
     report_lines.append(f"\nStatistics:")
     report_lines.append(f"  Overall Similarity - Average: {sum(overall_sims)/len(overall_sims):.4f}, "
                        f"Max: {max(overall_sims):.4f}, Min: {min(overall_sims):.4f}")
@@ -230,7 +280,7 @@ def generate_report(results: List[Dict], output_file: str = None):
     correct_count = sum(1 for r in results if r['correct'])
     report_lines.append(f"\nCorrectness Statistics: {correct_count}/{len(results)} problems passed tests")
     
-    report_lines.append("=" * 80)
+    report_lines.append("=" * 120)
     
     report_text = "\n".join(report_lines)
     print("\n" + report_text)
